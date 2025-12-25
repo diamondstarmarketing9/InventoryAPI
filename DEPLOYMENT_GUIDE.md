@@ -48,7 +48,7 @@ su - postgres
 # Enter the PostgreSQL shell
 psql
 ```
-
+q
 ### Inside the PostgreSQL Shell (`postgres=#`):
 Run the following SQL commands (change `YourSecurePass` to a real strong password):
 

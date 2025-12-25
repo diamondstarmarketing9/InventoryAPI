@@ -227,7 +227,73 @@ exports.produceStock = async (req, res) => {
         await t.commit();
         res.json({ message: 'Production recorded successfully', costPerUnit });
     } catch (error) {
-        await t.rollback();
         res.status(500).json({ error: error.message });
+    }
+};
+
+exports.getStockBalances = async (req, res) => {
+    try {
+        const { locationId, productId } = req.query;
+        const where = {};
+        if (locationId) where.LocationId = locationId;
+        if (productId) where.ProductId = productId;
+        const stocks = await StockBalance.findAll({ where });
+        res.json(stocks);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+exports.getStockMovements = async (req, res) => {
+    try {
+        const { locationId, productId, type, start, end } = req.query;
+        const where = {};
+        if (locationId) where[sequelize.Op.or] = [{ fromLocationId: locationId }, { toLocationId: locationId }];
+        if (productId) where.ProductId = productId;
+        if (type) where.type = type;
+        if (start && end) where.createdAt = { [sequelize.Op.between]: [start, end] };
+
+        const movements = await StockMovement.findAll({ where, order: [['createdAt', 'DESC']] });
+        res.json(movements);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+exports.adjustStock = async (req, res) => {
+    const { productId, locationId, quantity, type, remarks } = req.body;
+    // type: 'ADJUSTMENT' (usually + or - quantity. If user sends absolute, we must calc diff. Assuming delta qty here for simplicity)
+    const t = await sequelize.transaction();
+    try {
+        let stock = await StockBalance.findOne({ where: { ProductId: productId, LocationId: locationId }, transaction: t });
+        if (!stock) {
+            // If adjusting positive, create. If negative, error?
+            if (quantity < 0) throw new Error('Cannot deduct from non-existent stock');
+            stock = await StockBalance.create({ ProductId: productId, LocationId: locationId, quantity: 0 }, { transaction: t });
+        }
+
+        stock.quantity += parseFloat(quantity);
+        if (stock.quantity < 0) throw new Error('Resulting stock cannot be negative');
+        await stock.save({ transaction: t });
+
+        // Update Master
+        await updateStockMaster(productId, quantity, null, t);
+
+        await StockMovement.create({
+            ProductId: productId,
+            fromLocationId: quantity < 0 ? locationId : null,
+            toLocationId: quantity > 0 ? locationId : null,
+            type: 'ADJUSTMENT',
+            quantity: Math.abs(quantity),
+            unitCost: 0, // Adjustment usually has 0 cost impact unless specified
+            UserId: req.user ? req.user.id : null,
+            remarks
+        }, { transaction: t });
+
+        await t.commit();
+        res.json({ message: 'Stock adjusted' });
+    } catch (error) {
+        await t.rollback();
+        res.status(400).json({ error: error.message });
     }
 };
