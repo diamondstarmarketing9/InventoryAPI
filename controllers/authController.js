@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const socket = require('../socket');
 require('dotenv').config();
 
 exports.register = async (req, res) => {
@@ -22,7 +23,13 @@ exports.login = async (req, res) => {
         const match = await bcrypt.compare(password, user.password);
         if (!match) return res.status(400).json({ error: 'Invalid credentials' });
 
-        const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '8h' });
+        const token = jwt.sign({ id: user.id, role: user.role, username: user.username }, process.env.JWT_SECRET, { expiresIn: '8h' });
+
+        try {
+            const io = socket.getIO();
+            io.emit('user_activity', { type: 'LOGIN', userId: user.id, username: user.username, timestamp: new Date() });
+        } catch (e) { console.error('Socket emit failed', e); }
+
         res.json({ token });
     } catch (error) {
         res.status(500).json({ error: error.message });

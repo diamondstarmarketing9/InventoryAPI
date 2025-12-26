@@ -8,6 +8,7 @@ const Client = require('../models/Client');
 const Journal = require('../models/Journal');
 const sequelize = require('../config/db');
 const { Op } = require('sequelize');
+const socket = require('../socket');
 
 exports.createSale = async (req, res) => {
     const { locationId, items, paymentMethod, discount: globalDiscount, tax: globalTax } = req.body;
@@ -159,6 +160,16 @@ exports.createSale = async (req, res) => {
             items: saleItemsData
         });
 
+        try {
+            const io = socket.getIO();
+            io.to(`location_${locationId}`).emit('sale_created', {
+                saleId: sale.id,
+                totalAmount: calculatedTotal,
+                locationId,
+                timestamp: new Date()
+            });
+        } catch (e) { console.error('Socket emit failed', e); }
+
     } catch (error) {
         await t.rollback();
         res.status(400).json({ error: error.message });
@@ -212,6 +223,10 @@ exports.returnSale = async (req, res) => {
 
         // Mark sale as containing returns (or partial) - For now just responding success
         await t.commit();
+        try {
+            const io = socket.getIO();
+            io.to(`location_${originalSale.LocationId}`).emit('sale_returned', { saleId, locationId: originalSale.LocationId });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.json({ message: 'Return processed successfully' });
 
     } catch (error) {

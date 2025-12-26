@@ -5,6 +5,7 @@ const Location = require('../models/Location');
 const StockMaster = require('../models/StockMaster');
 const PriceHistory = require('../models/PriceHistory');
 const sequelize = require('../config/db');
+const socket = require('../socket');
 
 // Helper to update Stock Master
 const updateStockMaster = async (productId, qtyChange, newUnitCost, transaction) => {
@@ -78,6 +79,15 @@ exports.receiveStock = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+        try {
+            const io = socket.getIO();
+            io.to(`location_${locationId}`).emit('stock_updated', {
+                type: 'RECEIVE',
+                productId,
+                locationId,
+                newQuantity: stock.quantity
+            });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.json({ message: 'Stock received successfully', stock, averageCost: newWac });
     } catch (error) {
         await t.rollback();
@@ -117,6 +127,11 @@ exports.transferStock = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+        try {
+            const io = socket.getIO();
+            io.to(`location_${fromLocationId}`).emit('stock_updated', { productId, locationId: fromLocationId, type: 'TRANSFER_OUT' });
+            io.to(`location_${toLocationId}`).emit('stock_updated', { productId, locationId: toLocationId, type: 'TRANSFER_IN' });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.json({ message: 'Stock transferred successfully' });
     } catch (error) {
         await t.rollback();
@@ -158,6 +173,10 @@ exports.saleStock = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+        try {
+            const io = socket.getIO();
+            io.to(`location_${locationId}`).emit('stock_updated', { productId, locationId, newQuantity: stock.quantity, type: 'SALE' });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.json({ message: 'Sale recorded successfully' });
     } catch (error) {
         await t.rollback();
@@ -225,6 +244,10 @@ exports.produceStock = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+        try {
+            const io = socket.getIO();
+            io.to(`location_${locationId}`).emit('stock_updated', { productId: finishedProductId, locationId, newQuantity: finishedStock.quantity, type: 'PRODUCTION' });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.json({ message: 'Production recorded successfully', costPerUnit });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -291,6 +314,11 @@ exports.adjustStock = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+        try {
+            const io = socket.getIO();
+            const locId = quantity < 0 ? locationId : (quantity > 0 ? locationId : null);
+            if (locId) io.to(`location_${locId}`).emit('stock_updated', { productId, locationId: locId, type: 'ADJUSTMENT' });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.json({ message: 'Stock adjusted' });
     } catch (error) {
         await t.rollback();

@@ -1,5 +1,6 @@
 const Journal = require('../models/Journal');
 const sequelize = require('../config/db');
+const socket = require('../socket');
 
 // List with filters
 exports.getAllEntries = async (req, res) => {
@@ -63,6 +64,13 @@ exports.createManualEntry = async (req, res) => {
         }
 
         await t.commit();
+        try {
+            const io = socket.getIO();
+            // Broadcast to 'admin' room or similar? Or just global?
+            // Since ledgers are usually global or per store, let's assume global update for now or check if we can filter.
+            // But manual entries might not have a location.
+            io.emit('ledger_updated', { referenceId, timestamp: new Date() });
+        } catch (e) { console.error('Socket emit failed', e); }
         res.status(201).json({ message: 'Journal Entry Created', referenceId, entries: createdEntries });
     } catch (error) {
         await t.rollback();
